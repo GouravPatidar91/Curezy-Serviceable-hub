@@ -22,6 +22,15 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export default function App() {
+  const isConfigured = 
+    import.meta.env.VITE_SUPABASE_URL && 
+    import.meta.env.VITE_SUPABASE_ANON_KEY &&
+    import.meta.env.VITE_API_URL
+
+  if (!isConfigured) {
+    return <ConfigGuard />
+  }
+
   return (
     <AuthLayout>
       <AdminDashboard />
@@ -29,10 +38,57 @@ export default function App() {
   )
 }
 
+function ConfigGuard() {
+  return (
+    <div className="min-h-screen bg-[#0a0f18] text-white flex items-center justify-center p-6 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-900 to-black">
+      <div className="max-w-md w-full bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 rounded-[2.5rem] p-10 text-center shadow-2xl">
+        <div className="w-20 h-20 bg-primary-500/20 rounded-3xl flex items-center justify-center mx-auto mb-8 animate-pulse">
+          <ShieldAlert size={40} className="text-primary-400" />
+        </div>
+        <h1 className="text-3xl font-bold mb-4 bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Setup Required</h1>
+        <p className="text-slate-400 mb-8 leading-relaxed">
+          The Curezy Admin Panel is live, but it's missing the critical connections to your secure modules.
+        </p>
+        
+        <div className="space-y-3 text-left mb-8">
+          <ConfigStep label="VITE_SUPABASE_URL" active={!!import.meta.env.VITE_SUPABASE_URL} />
+          <ConfigStep label="VITE_SUPABASE_ANON_KEY" active={!!import.meta.env.VITE_SUPABASE_ANON_KEY} />
+          <ConfigStep label="VITE_API_URL" active={!!import.meta.env.VITE_API_URL} />
+        </div>
+
+        <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-200 text-sm flex gap-3 mb-8">
+          <AlertCircle size={32} className="shrink-0" />
+          <p>Add these to your <b>Vercel Project Settings</b> and redeploy the site.</p>
+        </div>
+
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full py-4 bg-primary-600 hover:bg-primary-500 rounded-2xl font-bold transition-all shadow-lg active:scale-95"
+        >
+          Check Connectivity
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ConfigStep({ label, active }: { label: string, active: boolean }) {
+  return (
+    <div className={cn(
+      "flex items-center justify-between p-3 rounded-xl border transition-all",
+      active ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" : "bg-slate-900/50 border-slate-700 text-slate-500"
+    )}>
+      <span className="font-mono text-sm">{label}</span>
+      {active ? <CheckCircle size={16} /> : <XCircle size={16} />}
+    </div>
+  )
+}
+
 function AdminDashboard() {
   const [stats, setStats] = useState<LocationOnboardingStats[]>([])
   const [hubs, setHubs] = useState<ServiceableHub[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [showAddHub, setShowAddHub] = useState(false)
   const [newHub, setNewHub] = useState({ hub_name: '', city_name: '', center_lat: '', center_lng: '', radius_km: '3.0' })
 
@@ -49,8 +105,16 @@ function AdminDashboard() {
       ])
       setStats(statsData)
       setHubs(hubsData)
-    } catch (err) {
+      setFetchError(null)
+    } catch (err: any) {
       console.error('Failed to fetch data', err)
+      const errorMsg = err.response?.data?.error || err.message || 'Connection failed'
+      // If it's a CORS error (no response), provide a specific tip
+      if (!err.response && err.message === 'Network Error') {
+        setFetchError('CORS_BLOCK')
+      } else {
+        setFetchError(errorMsg)
+      }
     } finally {
       setLoading(false)
     }
@@ -128,6 +192,33 @@ function AdminDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto space-y-12">
+        {/* Connection Warning */}
+        {fetchError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-red-500/20 p-2 rounded-lg">
+                <ShieldAlert size={20} className="text-red-400" />
+              </div>
+              <div>
+                <p className="text-red-200 font-semibold leading-none mb-1">
+                  {fetchError === 'CORS_BLOCK' ? 'CORS Security Block' : 'API Connection Error'}
+                </p>
+                <p className="text-red-400/80 text-sm">
+                  {fetchError === 'CORS_BLOCK' 
+                    ? 'Your browser blocked the request. Check Render ALLOWED_ORIGINS.' 
+                    : fetchError}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => fetchData()}
+              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 rounded-xl text-sm font-bold transition-all"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
+
         {/* Stats Grid */}
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard 
@@ -181,9 +272,11 @@ function AdminDashboard() {
                 {loading ? (
                   <tr><td colSpan={6} className="px-8 py-12 text-center text-slate-500">Loading hub data...</td></tr>
                 ) : hubs.map((hub) => {
-                  const cityStats = stats.find(s => 
-                    s.city?.toLowerCase().trim() === hub.city_name?.toLowerCase().trim()
-                  )
+                  const cityStats = stats.find(s => {
+                    const statsCity = (s.city || (s as any).city_name)?.toLowerCase().trim()
+                    const hubCity = hub.city_name?.toLowerCase().trim()
+                    return statsCity === hubCity
+                  })
                   return (
                     <tr key={hub.id} className="hover:bg-slate-700/20 transition-colors group">
                       <td className="px-8 py-6">
