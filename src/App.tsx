@@ -8,7 +8,6 @@ import {
   TrendingUp, 
   ShieldCheck,
   LogOut,
-  ChevronRight,
   Edit2
 } from 'lucide-react'
 import { adminApi } from './services/api'
